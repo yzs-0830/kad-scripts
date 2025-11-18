@@ -80,7 +80,7 @@ while True:
             node_info = kad_client.call("find_node", h)
             
             # 假設 Kademlia 協定回傳的 node_info 是一個 dict，包含 'ip' 鍵
-            target_ip = node_info.get("ip")
+            target_ip = node_info[b"ip"].decode()
 
             if not target_ip:
                 print(f"[auto_migrate] Warning: find_node returned no target IP for {filename}.")
