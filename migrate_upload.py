@@ -27,7 +27,7 @@ h = sha1_str(filename)
 print(f"[migrate_upload] Hash of {filename} = {h}")
 
 node = client.call("find_node", h)
-node_ip = node.get("ip")  # must be public IP
+node_ip = node[b"ip"].decode()  # must be public IP
 
 if node_ip is not None:
     node_ip = node_ip.decode()  # decode 成字串
