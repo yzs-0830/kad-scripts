@@ -29,8 +29,6 @@ print(f"[migrate_upload] Hash of {filename} = {h}")
 node = client.call("find_node", h)
 node_ip = node[b"ip"].decode()  # must be public IP
 
-if node_ip is not None:
-    node_ip = node_ip.decode()  # decode 成字串
 
 print(f"[migrate_upload] Uploading to http://{node_ip}:5058/upload")
 
