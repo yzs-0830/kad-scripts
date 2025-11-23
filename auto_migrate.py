@@ -31,7 +31,6 @@ def save_record(record):
         json.dump(record, f)
 
 
-
 def get_public_ip():
     try:
         public_ip = requests.get(
@@ -53,16 +52,17 @@ def new_client(ip, port):
 def sha1_filename(name: str):
     return hashlib.sha1(name.encode()).hexdigest()
 
-# New: Function to remove OS-added suffixes like (1), (2)
-def normalize_filename(name: str) -> str:
+# New: Function for strict normalization (keep letters, numbers, and underscores)
+def strict_normalize_filename(name: str) -> str:
+    """Removes all characters except letters, numbers, and underscores,
+       to get the cleanest base name (e.g., 'dolphin (1)_file.jpg' -> 'dolphin_1_file.jpg')."""
+    
     name_without_ext, ext = os.path.splitext(name)
     
-    # regex: match one or more spaces followed by (digits) at the end of the filename
+    # regex: Keep only alphanumeric characters and underscores (a-z, A-Z, 0-9, _)
     cleaned_name = re.sub(r'(\s\(\d+\))+(\s*)$', '', name_without_ext).strip()
     
-    if not cleaned_name:
-        return name
-        
+    # If the original name was 'dolphin (1) (2).jpg', cleaned_name will be 'dolphin12'
     return cleaned_name + ext
 
 
@@ -90,13 +90,26 @@ while True:
             if not os.path.isfile(fullpath):
                 continue
             
-            # Key fix: use normalized filename for hashing and lookups
-            normalized_filename = normalize_filename(filename)
+            # Key fix: use strictly normalized filename for hashing and lookups
+            normalized_filename = strict_normalize_filename(filename)
             h = sha1_filename(normalized_filename)
             
             print(f"---")
             print(f"[auto_migrate] Checking {filename} (Normalized: {normalized_filename}), sha1={h}")
 
+            # 🚨 New: Check if the filename is already clean (the base version)
+            # If the current filename is NOT the strictly clean version, it's a duplicate/junk copy.
+            if filename != normalized_filename:
+                print(f"[auto_migrate] 🗑️ Junk copy found: {filename}. Deleting file and skipping upload.")
+                try:
+                    os.remove(fullpath)
+                    print(f"[auto_migrate] Deleted: {filename}")
+                except Exception as e:
+                    print(f"[auto_migrate] Error deleting {filename}: {e}")
+                continue # Skip the rest of the loop for this deleted file
+
+            # --- Only the strictly clean version proceeds from here ---
+            
             node_info = kad_client.call("find_node", h)
             target_ip = node_info[b"ip"].decode()
 
