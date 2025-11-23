@@ -96,12 +96,19 @@ while True:
                 print(f"[auto_migrate] {filename} should move to {target_ip}")
 
                 if target_ip not in record[filename]:
-                    subprocess.call([
-                        "/usr/bin/python3",
-                        UPLOAD_SCRIPT,
-                        fullpath,
-                        target_ip
-                    ])
+                    check = requests.get(f"http://{target_ip}:5059/has_file", params={"name": filename}).json()
+
+                    # prevent upload exist file
+                    if check["exists"]:
+                        print("[auto_migrate] Node already has file, skip upload")
+                    else:
+                        print("[auto_migrate] Node does not have file, uploading...")
+                        subprocess.call([
+                            "/usr/bin/python3",
+                            UPLOAD_SCRIPT,
+                            fullpath,
+                            target_ip
+                        ])
                     record[filename].append(target_ip)
                     save_record(record)
                 else:
@@ -122,13 +129,19 @@ while True:
                         continue
 
                     if r_ip not in record[filename]:
-                        print(f"[auto_migrate] Replica missing on {r_ip}, uploading...")
-                        subprocess.call([
-                            "/usr/bin/python3",
-                            UPLOAD_SCRIPT,
-                            fullpath,
-                            r_ip
-                        ])
+                        check = requests.get(f"http://{r_ip}:5059/has_file", params={"name": filename}).json()
+
+                        # prevent upload exist file
+                        if check["exists"]:
+                            print("[auto_migrate] Node already has replica file, skip upload")
+                        else:
+                            print("[auto_migrate] Node does not have replica file, uploading...")
+                            subprocess.call([
+                                "/usr/bin/python3",
+                                UPLOAD_SCRIPT,
+                                fullpath,
+                                r_ip
+                            ])
                         record[filename].append(r_ip)
                         save_record(record)
                     else:
