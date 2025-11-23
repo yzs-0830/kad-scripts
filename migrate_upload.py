@@ -16,34 +16,23 @@ if len(sys.argv) < 3:
     print("Usage: migrate_upload.py <filepath> <target_public_ip> [normalized_filename]")
     sys.exit(1)
 
-filepath = sys.argv[1]
+filepath = sys.argv[1] # Path to the original file (e.g., /files/dolphin (1).jpg)
 target_ip = sys.argv[2]   # Public IP
 
-# --- Filename Determination and Normalization ---
-
-# Get the original filename from the path
-original_filename = os.path.basename(filepath)
-
-# 🚨 Primary fix: Use sys.argv[3] (normalized name) if provided
 if len(sys.argv) > 3:
-    # Use the normalized filename passed from auto_migrate.py
-    metadata_key_name = sys.argv[3] 
-    # Optional cleanup for safety, although the name should be clean already
-    metadata_key_name = metadata_key_name.strip("'\"")
-    print(f"[migrate_upload] Using normalized name: {metadata_key_name} for Metadata Key.")
+    # Use the normalized filename passed from auto_migrate.py (sys.argv[3])
+    filename_for_key = sys.argv[3].strip("'\"") 
+    print(f"[migrate_upload] Using normalized name: {filename_for_key} for Metadata Key.")
 else:
-    # Fallback to the original filename and strip any surrounding quotes/double quotes
-    metadata_key_name = original_filename.strip("'\"")
-    print(f"[migrate_upload] Using original name: {metadata_key_name} for Metadata Key.")
-
-# The name used to calculate the Kademlia Key (h) and store the Metadata
-filename_for_key = metadata_key_name 
+    # Fallback to the original filename from the path (if called manually)
+    filename_for_key = os.path.basename(filepath).strip("'\"")
+    print(f"[migrate_upload] Using original name: {filename_for_key} for Metadata Key.")
 
 # --- Kademlia Lookup ---
 
 client = new_client(target_ip, 5057)
 
-# Calculate Key (h) based on the consistent filename
+# Calculate Key (h) based on the consistent filename (filename_for_key)
 h = sha1_str(filename_for_key)
 print(f"[migrate_upload] Hash of {filename_for_key} = {h}")
 
@@ -53,10 +42,13 @@ node_ip = node[b"ip"].decode()  # must be public IP
 
 
 print(f"[migrate_upload] Uploading to http://{node_ip}:5058/upload")
+print(f"[migrate_upload] Storing Metadata as: {filename_for_key}") # Log the name used for storage
 
 # --- File Upload ---
 
 with open(filepath, "rb") as f:
+    # 🚨 Fix: Explicitly set the filename used in the POST request to the filename_for_key.
+    # This ensures the server stores the file (Metadata) with the consistent name.
     files = {"file": (filename_for_key, f)} 
     
     response = requests.post(
