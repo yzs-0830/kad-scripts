@@ -8,6 +8,7 @@ import hashlib
 import requests
 import sys
 import json
+import re # Add regex for filename normalization
 
 FILES_DIR = "/home/ec2-user/files"
 UPLOAD_SCRIPT = "/home/ec2-user/autoscript/migrate_upload.py"
@@ -26,6 +27,7 @@ def load_record():
 
 def save_record(record):
     with open(UPLOAD_RECORD, "w") as f:
+        # Use normalized filename as record key to ensure consistency
         json.dump(record, f)
 
 
@@ -51,6 +53,18 @@ def new_client(ip, port):
 def sha1_filename(name: str):
     return hashlib.sha1(name.encode()).hexdigest()
 
+# New: Function to remove OS-added suffixes like (1), (2)
+def normalize_filename(name: str) -> str:
+    name_without_ext, ext = os.path.splitext(name)
+    
+    # regex: match one or more spaces followed by (digits) at the end of the filename
+    cleaned_name = re.sub(r'(\s\(\d+\))+(\s*)$', '', name_without_ext).strip()
+    
+    if not cleaned_name:
+        return name
+        
+    return cleaned_name + ext
+
 
 public_ip = get_public_ip()
 print(f"[auto_migrate] Instance Public/Private IP = {public_ip}")
@@ -75,10 +89,13 @@ while True:
             fullpath = os.path.join(FILES_DIR, filename)
             if not os.path.isfile(fullpath):
                 continue
-
-            h = sha1_filename(filename)
+            
+            # Key fix: use normalized filename for hashing and lookups
+            normalized_filename = normalize_filename(filename)
+            h = sha1_filename(normalized_filename)
+            
             print(f"---")
-            print(f"[auto_migrate] Checking {filename}, sha1={h}")
+            print(f"[auto_migrate] Checking {filename} (Normalized: {normalized_filename}), sha1={h}")
 
             node_info = kad_client.call("find_node", h)
             target_ip = node_info[b"ip"].decode()
@@ -88,28 +105,35 @@ while True:
                 continue
 
             # initial file record
-            if filename not in record:
-                record[filename] = []
+            # Use normalized name as key in the record file
+            if normalized_filename not in record:
+                record[normalized_filename] = []
 
             # Primary Check
             if target_ip != public_ip:
                 print(f"[auto_migrate] {filename} should move to {target_ip}")
 
-                if target_ip not in record[filename]:
-                    check = requests.get(f"http://{target_ip}:5059/has_file", params={"name": filename}).json()
+                # Check record using normalized name
+                if target_ip not in record[normalized_filename]:
+                    
+                    # Check remote existence using normalized name
+                    check = requests.get(f"http://{target_ip}:5059/has_file", params={"name": normalized_filename}).json()
 
                     # prevent upload exist file
                     if check["exists"]:
-                        print("[auto_migrate] Node already has file, skip upload")
+                        print("[auto_migrate] Node already has file (using normalized name), skip upload")
                     else:
                         print("[auto_migrate] Node does not have file, uploading...")
+                        # Pass normalized filename as the 3rd argument (sys.argv[3])
                         subprocess.call([
                             "/usr/bin/python3",
                             UPLOAD_SCRIPT,
                             fullpath,
-                            target_ip
+                            target_ip,
+                            normalized_filename # Pass normalized name for consistent Metadata Key
                         ])
-                    record[filename].append(target_ip)
+                    
+                    record[normalized_filename].append(target_ip)
                     save_record(record)
                 else:
                     print(f"[auto_migrate] Already replicated to {target_ip}, skip.")
@@ -120,29 +144,36 @@ while True:
 
                 count = 0
                 for rnode in replica_info:
+                    # Look for 2 replicas (K=2)
                     if count == 2:
                         break
 
                     r_ip = rnode[b"ip"].decode()
 
-                    if r_ip == public_ip:
+                    # Skip self and the Primary node
+                    if r_ip == public_ip or r_ip == target_ip:
                         continue
 
-                    if r_ip not in record[filename]:
-                        check = requests.get(f"http://{r_ip}:5059/has_file", params={"name": filename}).json()
+                    # Check record using normalized name
+                    if r_ip not in record[normalized_filename]:
+                        
+                        # Check remote existence using normalized name
+                        check = requests.get(f"http://{r_ip}:5059/has_file", params={"name": normalized_filename}).json()
 
                         # prevent upload exist file
                         if check["exists"]:
-                            print("[auto_migrate] Node already has replica file, skip upload")
+                            print("[auto_migrate] Node already has replica file (using normalized name), skip upload")
                         else:
                             print("[auto_migrate] Node does not have replica file, uploading...")
+                            # Pass normalized filename as the 3rd argument (sys.argv[3])
                             subprocess.call([
                                 "/usr/bin/python3",
                                 UPLOAD_SCRIPT,
                                 fullpath,
-                                r_ip
+                                r_ip,
+                                normalized_filename # Pass normalized name for consistent Metadata Key
                             ])
-                        record[filename].append(r_ip)
+                        record[normalized_filename].append(r_ip)
                         save_record(record)
                     else:
                         print(f"[auto_migrate] Replica already exists on {r_ip}, skip.")
