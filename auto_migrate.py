@@ -8,7 +8,6 @@ import hashlib
 import requests
 import sys
 import json
-import re # Add regex for filename normalization
 
 FILES_DIR = "/home/ec2-user/files"
 UPLOAD_SCRIPT = "/home/ec2-user/autoscript/migrate_upload.py"
@@ -27,8 +26,8 @@ def load_record():
 
 def save_record(record):
     with open(UPLOAD_RECORD, "w") as f:
-        # Use normalized filename as record key to ensure consistency
         json.dump(record, f)
+
 
 
 def get_public_ip():
@@ -51,19 +50,6 @@ def new_client(ip, port):
 
 def sha1_filename(name: str):
     return hashlib.sha1(name.encode()).hexdigest()
-
-# New: Function for strict normalization (keep letters, numbers, and underscores)
-def strict_normalize_filename(name: str) -> str:
-    """Removes all characters except letters, numbers, and underscores,
-       to get the cleanest base name (e.g., 'dolphin (1)_file.jpg' -> 'dolphin_1_file.jpg')."""
-    
-    name_without_ext, ext = os.path.splitext(name)
-    
-    # regex: Keep only alphanumeric characters and underscores (a-z, A-Z, 0-9, _)
-    cleaned_name = re.sub(r'(\s\(\d+\))+(\s*)$', '', name_without_ext).strip()
-    
-    # If the original name was 'dolphin (1) (2).jpg', cleaned_name will be 'dolphin12'
-    return cleaned_name + ext
 
 
 public_ip = get_public_ip()
@@ -89,27 +75,11 @@ while True:
             fullpath = os.path.join(FILES_DIR, filename)
             if not os.path.isfile(fullpath):
                 continue
-            
-            # Key fix: use strictly normalized filename for hashing and lookups
-            normalized_filename = strict_normalize_filename(filename)
-            h = sha1_filename(normalized_filename)
-            
+
+            h = sha1_filename(filename)
             print(f"---")
-            print(f"[auto_migrate] Checking {filename} (Normalized: {normalized_filename}), sha1={h}")
+            print(f"[auto_migrate] Checking {filename}, sha1={h}")
 
-            # 🚨 New: Check if the filename is already clean (the base version)
-            # If the current filename is NOT the strictly clean version, it's a duplicate/junk copy.
-            if filename != normalized_filename:
-                print(f"[auto_migrate] 🗑️ Junk copy found: {filename}. Deleting file and skipping upload.")
-                try:
-                    os.remove(fullpath)
-                    print(f"[auto_migrate] Deleted: {filename}")
-                except Exception as e:
-                    print(f"[auto_migrate] Error deleting {filename}: {e}")
-                continue # Skip the rest of the loop for this deleted file
-
-            # --- Only the strictly clean version proceeds from here ---
-            
             node_info = kad_client.call("find_node", h)
             target_ip = node_info[b"ip"].decode()
 
@@ -118,35 +88,28 @@ while True:
                 continue
 
             # initial file record
-            # Use normalized name as key in the record file
-            if normalized_filename not in record:
-                record[normalized_filename] = []
+            if filename not in record:
+                record[filename] = []
 
             # Primary Check
             if target_ip != public_ip:
                 print(f"[auto_migrate] {filename} should move to {target_ip}")
 
-                # Check record using normalized name
-                if target_ip not in record[normalized_filename]:
-                    
-                    # Check remote existence using normalized name
-                    check = requests.get(f"http://{target_ip}:5059/has_file", params={"name": normalized_filename}).json()
+                if target_ip not in record[filename]:
+                    check = requests.get(f"http://{target_ip}:5059/has_file", params={"name": filename}).json()
 
                     # prevent upload exist file
                     if check["exists"]:
-                        print("[auto_migrate] Node already has file (using normalized name), skip upload")
+                        print("[auto_migrate] Node already has file, skip upload")
                     else:
                         print("[auto_migrate] Node does not have file, uploading...")
-                        # Pass normalized filename as the 3rd argument (sys.argv[3])
                         subprocess.call([
                             "/usr/bin/python3",
                             UPLOAD_SCRIPT,
                             fullpath,
-                            target_ip,
-                            normalized_filename # Pass normalized name for consistent Metadata Key
+                            target_ip
                         ])
-                    
-                    record[normalized_filename].append(target_ip)
+                    record[filename].append(target_ip)
                     save_record(record)
                 else:
                     print(f"[auto_migrate] Already replicated to {target_ip}, skip.")
@@ -157,36 +120,29 @@ while True:
 
                 count = 0
                 for rnode in replica_info:
-                    # Look for 2 replicas (K=2)
                     if count == 2:
                         break
 
                     r_ip = rnode[b"ip"].decode()
 
-                    # Skip self and the Primary node
-                    if r_ip == public_ip or r_ip == target_ip:
+                    if r_ip == public_ip:
                         continue
 
-                    # Check record using normalized name
-                    if r_ip not in record[normalized_filename]:
-                        
-                        # Check remote existence using normalized name
-                        check = requests.get(f"http://{r_ip}:5059/has_file", params={"name": normalized_filename}).json()
+                    if r_ip not in record[filename]:
+                        check = requests.get(f"http://{r_ip}:5059/has_file", params={"name": filename}).json()
 
                         # prevent upload exist file
                         if check["exists"]:
-                            print("[auto_migrate] Node already has replica file (using normalized name), skip upload")
+                            print("[auto_migrate] Node already has replica file, skip upload")
                         else:
                             print("[auto_migrate] Node does not have replica file, uploading...")
-                            # Pass normalized filename as the 3rd argument (sys.argv[3])
                             subprocess.call([
                                 "/usr/bin/python3",
                                 UPLOAD_SCRIPT,
                                 fullpath,
-                                r_ip,
-                                normalized_filename # Pass normalized name for consistent Metadata Key
+                                r_ip
                             ])
-                        record[normalized_filename].append(r_ip)
+                        record[filename].append(r_ip)
                         save_record(record)
                     else:
                         print(f"[auto_migrate] Replica already exists on {r_ip}, skip.")
