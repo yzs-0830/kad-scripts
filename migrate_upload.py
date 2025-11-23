@@ -20,6 +20,7 @@ filepath = sys.argv[1]
 target_ip = sys.argv[2]   # Public IP
 
 filename = os.path.basename(filepath)
+filename = filename.strip("'\"")
 
 client = new_client(target_ip, 5057)
 
